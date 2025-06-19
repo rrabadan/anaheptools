@@ -1,0 +1,53 @@
+[project]
+name = "anaheptools"
+version = "0.1.0"
+description = "HEP analysis basic tools"
+readme = "README.md"
+authors = [
+    { name = "Raul Rabadan", email = "raul.iraq.rabadan.trejo@cern.ch" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "hist[plot]>=2.8.1",
+    "matplotlib>=3.10.3",
+    "mplhep>=0.3.59",
+    "order>=2.1.7",
+    "pandas>=2.3.0",
+    "scikit-learn>=1.7.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+lint.select = ["E", "F", "I", "N", "W", "UP", "B"]
+lint.ignore = []
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+exclude = ["build", "dist", "__pycache__", ".venv"]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=3.6.0",
+    "black>=24.3.0",
+    "isort>=5.13.2",
+    "ruff>=0.3.4",
+    "mypy>=1.9.0",
+]
