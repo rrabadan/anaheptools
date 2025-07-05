@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Any
+
 import hist
 import matplotlib.pyplot as plt
 import mplhep
@@ -7,86 +10,444 @@ from hist import Hist
 from .utils import is_collection
 
 
-def hist_from_array(arr, branches, name, label, range, bins, transform=None, weight=None, **kwargs):
+def hist1d_from_array(
+    arr: dict[str, Any],
+    branches: str | list[str],
+    name: str,
+    label: str,
+    range_: tuple[float, float],
+    bins: int,
+    transform: Callable | None = None,
+    weight: str | np.ndarray | None = None,
+    **kwargs,
+) -> Hist:
+    """
+    Create a histogram from array data.
+
+    Args:
+        arr: Dictionary-like object containing branch data (e.g., from uproot)
+        branches: Single branch name or list of branch names to use
+        name: Name identifier for the histogram
+        label: Human-readable label for axis
+        range_: Tuple of (min, max) values for histogram range
+        bins: Number of bins for the histogram
+        transform: Optional function to transform the input data
+        weight: Optional weights (branch name or array)
+        **kwargs: Additional histogram configuration
+            - overflow: Include overflow bin (default: False)
+            - underflow: Include underflow bin (default: False)
+            - storage: Histogram storage type (default: hist.storage.Weight())
+
+    Returns:
+        Configured histogram filled with data
+
+    Raises:
+        ValueError: If branches are missing from array or range is invalid
+        TypeError: If transform function signature is incompatible
+    """
+    # Input validation
+    if not isinstance(branches, str | list):
+        raise TypeError("branches must be string or list of strings")
+
+    if isinstance(branches, str):
+        branches = [branches]
+
+    # Check if all branches exist in the array
+    # missing_branches = [b for b in branches if b not in arr]
+    # if missing_branches:
+    #     raise ValueError(f"Missing branches in array: {missing_branches}")
+
+    # Validate range
+    if len(range_) != 2 or range_[0] >= range_[1]:
+        raise ValueError(f"Invalid range: {range_}. Must be (min, max) with min < max")
+
+    if bins <= 0:
+        raise ValueError(f"bins must be positive, got {bins}")
+
+    # Extract configuration
     overflow = kwargs.pop("overflow", False)
     underflow = kwargs.pop("underflow", False)
+    storage = kwargs.pop("storage", hist.storage.Weight())
+
+    # Create histogram
     h = Hist(
-        hist.axis.Regular(
-            bins,
-            *range,
-        ),
-        storage=hist.storage.Weight(),
+        hist.axis.Regular(bins, range_[0], range_[1], overflow=overflow, underflow=underflow),
+        storage=storage,
     )
 
-    h.overflow = overflow
-    h.underflow = underflow
+    # Set metadata
     h.label = label
     h.name = name
 
-    if transform is not None:
-        data = (transform(*(arr[b] for b in branches)),)
-    else:
-        data = (arr[b] for b in branches)
+    # Prepare data
+    try:
+        if transform is not None:
+            # Apply transformation
+            branch_data = [arr[b] for b in branches]
+            if len(branches) == 1:
+                data = transform(branch_data[0])
+            else:
+                data = transform(*branch_data)
+            data = (data,)
+        else:
+            # Use data directly
+            if len(branches) == 1:
+                data = (arr[branches[0]],)
+            else:
+                # For multiple branches without transform, take the first one
+                # or you might want to raise an error here
+                data = (arr[branches[0]],)
+    except Exception as e:
+        raise RuntimeError(f"Error applying transform or accessing data: {e}") from None
 
-    h.fill(*data, weight=weight)
+    # Handle weights
+    weight_array = None
+    if weight is not None:
+        if isinstance(weight, str):
+            if weight not in arr:
+                raise ValueError(f"Weight branch '{weight}' not found in array")
+            weight_array = arr[weight]
+        else:
+            weight_array = weight
+
+    # Fill histogram
+    try:
+        h.fill(*data, weight=weight_array)
+    except Exception as e:
+        raise RuntimeError(f"Error filling histogram: {e}") from None
+
     return h
 
 
-def hist_from_var(var, arr, weight=None):
+def hist1d_from_var(
+    var, arr: dict[str, Any], weight: str | np.ndarray | None = None, **kwargs
+) -> Hist:
     """
-    Create a histogram from a variable and an input array.
-    Variable definition is expected to have the following attributes:
-    - branch: name of the branch in the input array
-    - name: name of the histogram
-    - label: label of the histogram
-    - range: range of the histogram
-    - bins: number of bins
-    - transform: function to transform the input array
+    Create a histogram from a Var object and input array.
+
+    Args:
+        var: Variable object with required attributes:
+            - input_branches (or branch): branch name(s) in the input array
+            - name: histogram identifier
+            - label: axis label
+            - x_min, x_max: histogram range
+            - n_bins: number of bins
+            - expression: optional transformation function
+        arr: Dictionary-like object containing branch data
+        weight: Optional weights (branch name or array)
+        **kwargs: Additional histogram configuration passed to hist_from_array
+
+    Returns:
+        Configured histogram filled with data
+
+    Raises:
+        AttributeError: If required variable attributes are missing
+        ValueError: If variable configuration is invalid
     """
-    branch = var.branch
-    if not is_collection(branch):
-        branch = [branch]
-    return hist_from_array(
-        arr,
-        branch,
-        var.name,
-        var.label,
-        (var.x_min, var.x_max),
-        var.n_bins,
-        var.expression,
+    # Check for required attributes
+    required_attrs = ["name", "label", "x_min", "x_max", "n_bins"]
+    missing_attrs = [attr for attr in required_attrs if not hasattr(var, attr)]
+    if missing_attrs:
+        raise AttributeError(f"Variable missing required attributes: {missing_attrs}")
+
+    # Get branches (support both old 'branch' and new 'input_branches')
+    if hasattr(var, "input_branches"):
+        branches = var.input_branches
+    elif hasattr(var, "branch"):
+        branches = var.branch
+    else:
+        raise AttributeError("Variable must have 'input_branches' or 'branch' attribute")
+
+    # Ensure branches is a list
+    if not is_collection(branches):
+        branches = [branches]
+
+    # Get transformation function
+    transform = getattr(var, "expression", None)
+
+    # Validate range
+    if var.x_min >= var.x_max:
+        raise ValueError(f"Invalid variable range: x_min={var.x_min}, x_max={var.x_max}")
+
+    return hist1d_from_array(
+        arr=arr,
+        branches=branches,
+        name=var.name,
+        label=var.label,
+        range_=(var.x_min, var.x_max),
+        bins=var.n_bins,
+        transform=transform,
         weight=weight,
+        **kwargs,
     )
 
 
-def plot_hist(ax, h, logy=False, **kwargs):
-    histtype = kwargs.get("histtype", "step")
-    color = kwargs.get("color", "black")
-    label = kwargs.get("label", None)
-    flow = kwargs.get("flow", "none")
-    density = kwargs.get("density", False)
-    alpha = kwargs.get("alpha", 1)
-    mplhep.histplot(
-        h,
-        ax=ax,
-        histtype=histtype,
-        color=color,
-        flow=flow,
-        label=label,
-        density=density,
-        alpha=alpha,
+def quick_hist1d(
+    arr: dict[str, Any],
+    branch: str,
+    bins: int = 50,
+    range_: tuple[float, float] | None = None,
+    weight: str | np.ndarray | None = None,
+    **kwargs,
+) -> Hist:
+    """
+    Quick histogram creation with automatic range detection.
+
+    Args:
+        arr: Dictionary-like object containing branch data
+        branch: Branch name to histogram
+        bins: Number of bins (default: 50)
+        range_: Optional range tuple, auto-detected if None
+        weight: Optional weights
+        **kwargs: Additional configuration
+    """
+    if branch not in arr:
+        raise ValueError(f"Branch '{branch}' not found in array")
+
+    data = arr[branch]
+
+    # Auto-detect range if not provided
+    if range_ is None:
+        if len(data) == 0:
+            raise ValueError("Cannot auto-detect range for empty data")
+        range_ = (float(np.min(data)), float(np.max(data)))
+        # Add small padding
+        padding = (range_[1] - range_[0]) * 0.05
+        range_ = (range_[0] - padding, range_[1] + padding)
+
+    return hist1d_from_array(
+        arr=arr,
+        branches=branch,
+        name=branch,
+        label=branch.replace("_", " ").title(),
+        range_=range_,
+        bins=bins,
+        weight=weight,
+        **kwargs,
     )
-    ax.set_xlabel(h.label)
-    ax.set_ylabel("Candidates")
-    ax.set_ylim(bottom=0)
-    # ax.set_title(h.name)
+
+
+def plot_hist1d(
+    ax: plt.Axes,
+    h: Hist,
+    logy: bool = False,
+    show_stats: bool = False,
+    show_overflow: bool = False,
+    show_underflow: bool = False,
+    **kwargs,
+) -> None:
+    """
+    Plot a histogram on the given axes with extensive customization options.
+
+    Args:
+        ax: Matplotlib axes to plot on
+        h: Histogram object to plot
+        logy: Use logarithmic y-scale (default: False)
+        show_stats: Display statistics box (entries, mean, std) (default: False)
+        show_overflow: Include overflow in flow parameter (default: False)
+        show_underflow: Include underflow in flow parameter (default: False)
+        **kwargs: Additional plotting options:
+            # Style options
+            - histtype: "step", "fill", "stepfilled" (default: "step")
+            - color: Plot color (default: "black")
+            - alpha: Transparency (default: 1.0)
+            - linewidth/lw: Line width (default: 1.5)
+            - linestyle/ls: Line style (default: "-")
+
+            # Label and legend options
+            - label: Legend label (default: histogram name or None)
+            - show_label_in_legend: Include label in legend (default: True if label provided)
+
+            # Data options
+            - density: Normalize to density (default: False)
+            - flow: Flow handling "hint", "show", "sum", "none" (default: auto-determined)
+
+            # Axis options
+            - ylabel: Y-axis label (default: "Candidates" or "Density")
+            - xlabel: X-axis label (default: histogram label)
+            - ylim_bottom: Y-axis bottom limit (default: 0)
+            - ylim_top: Y-axis top limit (default: auto)
+            - xlim: X-axis limits tuple (default: auto)
+
+            # Grid and styling
+            - grid: Show grid (default: False)
+            - grid_alpha: Grid transparency (default: 0.3)
+
+    Raises:
+        ValueError: If histogram is empty or invalid
+        TypeError: If histogram type is not supported
+    """
+    # Input validation
+    if h is None:
+        raise ValueError("Histogram cannot be None")
+
+    if not hasattr(h, "values"):
+        raise TypeError("Object must be a histogram with 'values' method")
+
+    # Check if histogram is empty
+    if h.sum() == 0:
+        print(f"Warning: Histogram '{getattr(h, 'name', 'unnamed')}' is empty")
+
+    # Extract style parameters
+    histtype = kwargs.pop("histtype", "step")
+    color = kwargs.pop("color", "black")
+    alpha = kwargs.pop("alpha", 1.0)
+    linewidth = kwargs.pop("linewidth", kwargs.pop("lw", 1.5))
+    linestyle = kwargs.pop("linestyle", kwargs.pop("ls", "-"))
+
+    # Extract label parameters
+    label = kwargs.pop("label", getattr(h, "name", None))
+    show_label_in_legend = kwargs.pop("show_label_in_legend", label is not None)
+
+    # Extract data parameters
+    density = kwargs.pop("density", False)
+
+    # Determine flow parameter
+    flow = kwargs.pop("flow", None)
+    if flow is None:
+        if show_overflow and show_underflow:
+            flow = "show"
+        elif show_overflow or show_underflow:
+            flow = "hint"
+        else:
+            flow = "none"
+
+    # Extract axis parameters
+    ylabel = kwargs.pop("ylabel", "Density" if density else "Candidates")
+    xlabel = kwargs.pop("xlabel", getattr(h, "label", ""))
+    ylim_bottom = kwargs.pop("ylim_bottom", 0)
+    ylim_top = kwargs.pop("ylim_top", None)
+    xlim = kwargs.pop("xlim", None)
+
+    # Extract grid parameters
+    grid = kwargs.pop("grid", False)
+    grid_alpha = kwargs.pop("grid_alpha", 0.3)
+
+    # Plot histogram using mplhep
+    try:
+        mplhep.histplot(
+            h,
+            ax=ax,
+            histtype=histtype,
+            color=color,
+            alpha=alpha,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            flow=flow,
+            label=label if show_label_in_legend else None,
+            density=density,
+            **kwargs,  # Pass any remaining kwargs to mplhep.histplot
+        )
+    except Exception as e:
+        raise RuntimeError(f"Error plotting histogram: {e}") from None
+
+    # Configure axes
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+
+    # Set y-axis limits
     if logy:
         ax.set_yscale("log")
+        # For log scale, set a small positive bottom limit
+        current_ylim = ax.get_ylim()
+        if ylim_bottom <= 0:
+            ylim_bottom = max(0.1, current_ylim[0])
+
+    if ylim_top is not None:
+        ax.set_ylim(bottom=ylim_bottom, top=ylim_top)
+    else:
+        ax.set_ylim(bottom=ylim_bottom)
+
+    # Set x-axis limits if specified
+    if xlim is not None:
+        ax.set_xlim(xlim)
+
+    # Configure grid
+    if grid:
+        ax.grid(True, alpha=grid_alpha)
+
+    # Add statistics box if requested
+    if show_stats:
+        _add_stats_box(ax, h, density=density)
+
+
+def _add_stats_box(ax: plt.Axes, h: Hist, density: bool = False) -> None:
+    """Add a statistics text box to the plot."""
+    try:
+        entries = int(h.sum())
+
+        # Calculate mean and std if possible
+        if hasattr(h, "axes") and len(h.axes) > 0:
+            # Get bin centers and values
+            bin_centers = h.axes[0].centers
+            bin_values = h.values()
+
+            if entries > 0:
+                # Calculate weighted mean and std
+                weights = bin_values / np.sum(bin_values) if np.sum(bin_values) > 0 else bin_values
+                mean = np.average(bin_centers, weights=weights)
+                variance = np.average((bin_centers - mean) ** 2, weights=weights)
+                std = np.sqrt(variance)
+
+                stats_text = f"Entries: {entries}\nMean: {mean:.3f}\nStd: {std:.3f}"
+            else:
+                stats_text = f"Entries: {entries}\nMean: N/A\nStd: N/A"
+        else:
+            stats_text = f"Entries: {entries}"
+
+        # Add text box
+        ax.text(
+            0.02,
+            0.98,
+            stats_text,
+            transform=ax.transAxes,
+            verticalalignment="top",
+            fontsize=10,
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+
+    except Exception:
+        # If stats calculation fails, just show entries
+        try:
+            entries = int(h.sum())
+            ax.text(
+                0.02,
+                0.98,
+                f"Entries: {entries}",
+                transform=ax.transAxes,
+                verticalalignment="top",
+                fontsize=10,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            )
+        except Exception:
+            pass  # If even basic stats fail, don't show anything
+
+
+# Convenience functions for common plot styles
+def plot_hist1d_filled(ax: plt.Axes, h: Hist, **kwargs) -> None:
+    """Plot histogram with filled style."""
+    kwargs.setdefault("histtype", "stepfilled")
+    kwargs.setdefault("alpha", 0.7)
+    plot_hist1d(ax, h, **kwargs)
+
+
+def plot_hist1d_outline(ax: plt.Axes, h: Hist, **kwargs) -> None:
+    """Plot histogram with outline style."""
+    kwargs.setdefault("histtype", "step")
+    kwargs.setdefault("linewidth", 2)
+    plot_hist1d(ax, h, **kwargs)
+
+
+def plot_hist1d_with_errors(ax: plt.Axes, h: Hist, **kwargs) -> None:
+    """Plot histogram with error bars."""
+    kwargs.setdefault("yerr", True)  # This depends on mplhep support
+    plot_hist1d(ax, h, **kwargs)
 
 
 def plot_hist1d_comparison(hists, legends, ax, histtypes, colors, **kwargs):
     max_density = 0
     for h, leg, ht, c in zip(hists, legends, histtypes, colors, strict=False):
-        plot_hist(ax, h, label=leg, histtype=ht, color=c, density=True, **kwargs)
+        plot_hist1d(ax, h, label=leg, histtype=ht, color=c, density=True, **kwargs)
         max_density = max(max_density, max(h.density()))
     ax.set_ylim(bottom=0, top=max_density * 1.05)
     # ax.set_ylim(bottom=0, top=ax.get_ylim()[1] * 1.15)
