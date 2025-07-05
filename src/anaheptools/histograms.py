@@ -444,13 +444,83 @@ def plot_hist1d_with_errors(ax: plt.Axes, h: Hist, **kwargs) -> None:
     plot_hist1d(ax, h, **kwargs)
 
 
-def plot_hist1d_comparison(hists, legends, ax, histtypes, colors, **kwargs):
-    max_density = 0
-    for h, leg, ht, c in zip(hists, legends, histtypes, colors, strict=False):
-        plot_hist1d(ax, h, label=leg, histtype=ht, color=c, density=True, **kwargs)
-        max_density = max(max_density, max(h.density()))
-    ax.set_ylim(bottom=0, top=max_density * 1.05)
-    # ax.set_ylim(bottom=0, top=ax.get_ylim()[1] * 1.15)
+def plot_hist1d_comparison(
+    hists: list[Hist],
+    legends: list[Hist],
+    ax: plt.Axes,
+    histtypes: list[str],
+    colors: list[str],
+    normalize: bool = True,
+    auto_ylim: bool = True,
+    ylim_margin: float = 0.05,
+    **kwargs,
+):
+    """
+    Plot multiple histograms on the same axes for comparison.
+
+    Args:
+        hists: List of histogram objects to plot
+        legends: List of legend labels for each histogram
+        ax: Matplotlib axes to plot on
+        histtypes: List of histogram types for each plot
+        colors: List of colors for each histogram
+        normalize: Whether to normalize histograms to density (default: True)
+        auto_ylim: Automatically set y-axis limits (default: True)
+        ylim_margin: Margin factor for y-axis top limit (default: 0.05)
+        **kwargs: Additional arguments passed to plot_hist1d
+
+    Raises:
+        ValueError: If input lists have different lengths or are empty
+        TypeError: If histogram objects are invalid
+    """
+    input_lists = [hists, legends, histtypes, colors]
+    list_names = ["hists", "legends", "histtypes", "colors"]
+
+    if not all(len(lst) == len(hists) for lst in input_lists):
+        lengths = [len(lst) for lst in input_lists]
+        raise ValueError(
+            f"Inputs must have the same length. Got: {dict(zip(list_names, lengths, strict=False))}"
+        )
+
+    # Validate histogram objects
+    for i, h in enumerate(hists):
+        if not hasattr(h, "values") or not hasattr(h, "sum"):
+            raise TypeError(f"hists[{i}] is not a valid histogram object")
+
+    max_value = 0
+    plotted_hists = []
+
+    for h, legend, histtype, color in zip(hists, legends, histtypes, colors, strict=True):
+        try:
+            plot_hist1d(
+                ax, h, label=legend, histtype=histtype, color=color, density=normalize, **kwargs
+            )
+
+            if auto_ylim:
+                if normalize and hasattr(h, "density"):
+                    current_max = np.max(h.density())
+                else:
+                    current_max = np.max(h.values())
+                max_value = max(max_value, current_max)
+
+            plotted_hists.append(h)
+
+        except Exception as e:
+            print(f"Warning: Failed to plot histogram '{legend}': {e}")
+            continue
+
+        if not plotted_hists:
+            raise ValueError("No valid histograms were plotted. Check input data.")
+
+        if auto_ylim and max_value > 0:
+            # Set y-axis limits based on maximum value
+            ax.set_ylim(bottom=0, top=max_value * (1 + ylim_margin))
+        # max_density = max(max_density, max(h.density()))
+        # ax.set_ylim(bottom=0, top=max_density * 1.05)
+        # ax.set_ylim(bottom=0, top=ax.get_ylim()[1] * 1.15)
+
+        if any(legends):
+            ax.legend(loc="best", fontsize="small", frameon=False)
 
 
 def multi_hist1d_comparison(hists, legends, histtypes, colors, **kwargs):
