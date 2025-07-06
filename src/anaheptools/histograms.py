@@ -41,8 +41,8 @@ def axis_from_var(var: Var, **kwargs) -> hist.axis.AxesMixin:
 
     if var.x_discrete:
         axis = hist.axis.Integer(
-            var.x_min,
-            var.x_max,
+            int(var.x_min),
+            int(var.x_max),
             name=var.name,
             label=var.label,
             underflow=underflow,
@@ -353,8 +353,8 @@ def plot_hist1d(
             flow = "none"
 
     # Extract axis parameters
-    ylabel = kwargs.pop("ylabel", "Density" if density else "Candidates")
-    xlabel = kwargs.pop("xlabel", getattr(h, "label", ""))
+    ylabel = kwargs.pop("ylabel", "Density" if density else "Entries")
+    xlabel = kwargs.pop("xlabel", getattr(h.axes[0], "label", ""))
     ylim_bottom = kwargs.pop("ylim_bottom", 0)
     ylim_top = kwargs.pop("ylim_top", None)
     xlim = kwargs.pop("xlim", None)
