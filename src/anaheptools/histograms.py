@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Any
 
 import hist
@@ -7,187 +6,220 @@ import mplhep
 import numpy as np
 from hist import Hist
 
-from .utils import is_collection
+from .variables import Var, arrays_from_vars
 
 
-def hist1d_from_array(
-    arr: dict[str, Any],
-    branches: str | list[str],
-    name: str,
-    label: str,
-    range_: tuple[float, float],
-    bins: int,
-    transform: Callable | None = None,
-    weight: str | np.ndarray | None = None,
-    **kwargs,
-) -> Hist:
+def axis_from_var(var: Var, **kwargs) -> hist.axis.AxesMixin:
     """
-    Create a histogram from array data.
+    Create a histogram axis from a Var object.
 
     Args:
-        arr: Dictionary-like object containing branch data (e.g., from uproot)
-        branches: Single branch name or list of branch names to use
-        name: Name identifier for the histogram
-        label: Human-readable label for axis
-        range_: Tuple of (min, max) values for histogram range
-        bins: Number of bins for the histogram
-        transform: Optional function to transform the input data
-        weight: Optional weights (branch name or array)
-        **kwargs: Additional histogram configuration
-            - overflow: Include overflow bin (default: False)
-            - underflow: Include underflow bin (default: False)
-            - storage: Histogram storage type (default: hist.storage.Weight())
+        var: Variable object with attributes:
+            - x_min, x_max: Range of the axis
+            - n_bins: Number of bins
+            - label: Axis label
 
     Returns:
-        Configured histogram filled with data
+        Hist axis object configured with the variable's properties
 
     Raises:
-        ValueError: If branches are missing from array or range is invalid
-        TypeError: If transform function signature is incompatible
+        AttributeError: If required attributes are missing
+        ValueError: If variable configuration is invalid
     """
-    # Input validation
-    if not isinstance(branches, str | list):
-        raise TypeError("branches must be string or list of strings")
 
-    if isinstance(branches, str):
-        branches = [branches]
+    if not hasattr(var, "x_min") or not hasattr(var, "x_max"):
+        raise AttributeError("Variable must have 'x_min' and 'x_max' attributes")
 
-    # Check if all branches exist in the array
-    # missing_branches = [b for b in branches if b not in arr]
-    # if missing_branches:
-    #     raise ValueError(f"Missing branches in array: {missing_branches}")
+    if var.x_min >= var.x_max:
+        raise ValueError(f"Invalid variable range: x_min={var.x_min}, x_max={var.x_max}")
 
-    # Validate range
-    if len(range_) != 2 or range_[0] >= range_[1]:
-        raise ValueError(f"Invalid range: {range_}. Must be (min, max) with min < max")
+    if not hasattr(var, "x_discrete"):
+        raise AttributeError("Variable must have 'x_discrete' attribute")
 
-    if bins <= 0:
-        raise ValueError(f"bins must be positive, got {bins}")
+    underflow = kwargs.get("underflow", False)
+    overflow = kwargs.get("overflow", False)
 
-    # Extract configuration
-    overflow = kwargs.pop("overflow", False)
-    underflow = kwargs.pop("underflow", False)
-    storage = kwargs.pop("storage", hist.storage.Weight())
+    if var.x_discrete:
+        axis = hist.axis.Integer(
+            var.x_min,
+            var.x_max,
+            name=var.name,
+            label=var.label,
+            underflow=underflow,
+            overflow=overflow,
+        )
+        return axis
 
-    # Create histogram
-    h = Hist(
-        hist.axis.Regular(bins, range_[0], range_[1], overflow=overflow, underflow=underflow),
-        storage=storage,
+    if not hasattr(var, "n_bins"):
+        raise AttributeError("Non discrete variable must have 'n_bins' attribute")
+
+    if hasattr(var, "binning") and len(var.binning) != 3:
+        if not hasattr(var, "bin_edges"):
+            raise AttributeError("Variable must have 'bin_edges' attribute for variable binning")
+        axis = hist.axis.Variable(
+            var.bin_edges,
+            name=var.name,
+            label=var.label,
+            underflow=underflow,
+            overflow=overflow,
+        )
+        return axis
+
+    axis = hist.axis.Regular(
+        var.n_bins,
+        var.x_min,
+        var.x_max,
+        name=var.name,
+        label=var.label,
+        underflow=underflow,
+        overflow=overflow,
     )
 
-    # Set metadata
-    h.label = label
+    return axis
+
+
+def histogram_from_axes(
+    axes: list[hist.axis.AxesMixin],
+    name: str,
+    storage: hist.storage.Storage | None = None,
+):
+    """
+    Create a histogram from a list of axes.
+
+    Args:
+        axes: List of hist.axis.AxesMixin objects to define the histogram axes
+        name: Name identifier for the histogram
+        storage: Optional storage type for the histogram (default: hist.storage.Weight())
+
+    Returns:
+        Empty histogram object
+    """
+    if storage is None:
+        storage = hist.storage.Weight()
+
+    h = Hist(*axes, storage=storage)
     h.name = name
-
-    # Prepare data
-    try:
-        if transform is not None:
-            # Apply transformation
-            branch_data = [arr[b] for b in branches]
-            if len(branches) == 1:
-                data = transform(branch_data[0])
-            else:
-                data = transform(*branch_data)
-            data = (data,)
-        else:
-            # Use data directly
-            if len(branches) == 1:
-                data = (arr[branches[0]],)
-            else:
-                # For multiple branches without transform, take the first one
-                # or you might want to raise an error here
-                data = (arr[branches[0]],)
-    except Exception as e:
-        raise RuntimeError(f"Error applying transform or accessing data: {e}") from None
-
-    # Handle weights
-    weight_array = None
-    if weight is not None:
-        if isinstance(weight, str):
-            if weight not in arr:
-                raise ValueError(f"Weight branch '{weight}' not found in array")
-            weight_array = arr[weight]
-        else:
-            weight_array = weight
-
-    # Fill histogram
-    try:
-        h.fill(*data, weight=weight_array)
-    except Exception as e:
-        raise RuntimeError(f"Error filling histogram: {e}") from None
 
     return h
 
 
 def hist1d_from_var(
-    var, arr: dict[str, Any], weight: str | np.ndarray | None = None, **kwargs
+    var: Var,
+    data: dict[str, Any],
+    weight: str | np.ndarray | None = None,
+    **kwargs,
 ) -> Hist:
     """
-    Create a histogram from a Var object and input array.
+    Create and fill a 1D histogram from a Var object.
 
     Args:
-        var: Variable object with required attributes:
-            - input_branches (or branch): branch name(s) in the input array
-            - name: histogram identifier
-            - label: axis label
-            - x_min, x_max: histogram range
-            - n_bins: number of bins
-            - expression: optional transformation function
+        var: Variable object with required attributes
         arr: Dictionary-like object containing branch data
         weight: Optional weights (branch name or array)
-        **kwargs: Additional histogram configuration passed to hist_from_array
+        **kwargs: Additional configuration passed to axis creation
 
     Returns:
-        Configured histogram filled with data
+        Filled 1D histogram
 
     Raises:
         AttributeError: If required variable attributes are missing
         ValueError: If variable configuration is invalid
     """
-    # Check for required attributes
-    required_attrs = ["name", "label", "x_min", "x_max", "n_bins"]
-    missing_attrs = [attr for attr in required_attrs if not hasattr(var, attr)]
-    if missing_attrs:
-        raise AttributeError(f"Variable missing required attributes: {missing_attrs}")
+    # Create axis from variable
+    axis = axis_from_var(var, **kwargs)
 
-    # Get branches (support both old 'branch' and new 'input_branches')
-    if hasattr(var, "input_branches"):
-        branches = var.input_branches
-    elif hasattr(var, "branch"):
-        branches = var.branch
+    # Create empty histogram
+    histogram = histogram_from_axes([axis], var.name)
+
+    # Get data using Var's functionality
+    array = var.compute_array(data)
+
+    # Handle weights
+    weight_array = _process_weight(weight, data)
+
+    # Fill histogram
+    try:
+        histogram.fill(array, weight=weight_array)
+    except Exception as e:
+        raise RuntimeError(f"Error filling histogram for variable '{var.name}': {e}") from e
+
+    return histogram
+
+
+def hist_nd_from_vars(
+    variables: list[Var],
+    data: dict[str, Any],
+    name: str,
+    weight: str | np.ndarray | None = None,
+    **kwargs,
+) -> Hist:
+    """
+    Create and fill an N-dimensional histogram from multiple Var objects.
+
+    Args:
+        variables: List of Var objects (one per dimension)
+        arr: Dictionary-like object containing branch data
+        name: Name for the histogram
+        weight: Optional weights
+        **kwargs: Additional configuration for axes
+
+    Returns:
+        Filled N-dimensional histogram
+    """
+    if not variables:
+        raise ValueError("At least one variable must be provided")
+
+    # Create axes from variables
+    axes = [axis_from_var(var, **kwargs) for var in variables]
+
+    # Create empty histogram
+    histogram = histogram_from_axes(axes, name)
+
+    # Get data from all variables
+    # arrays = [var.compute_array(data) for var in variables]
+    arrays = arrays_from_vars(variables, data)
+
+    # Handle weights
+    weight_array = _process_weight(weight, data)
+
+    # Fill histogram
+    try:
+        histogram.fill(*arrays, weight=weight_array)
+    except Exception as e:
+        raise RuntimeError(f"Error filling {len(variables)}D histogram: {e}") from e
+
+    return histogram
+
+
+def _process_weight(weight: str | np.ndarray | None, arr: dict[str, Any]) -> np.ndarray | None:
+    """
+    Process weight parameter into a weight array.
+
+    Args:
+        weight: Weight specification (branch name or array)
+        arr: Dictionary containing branch data
+
+    Returns:
+        Weight array or None
+    """
+    if weight is None:
+        return None
+
+    if isinstance(weight, str):
+        if weight not in arr:
+            raise ValueError(f"Weight branch '{weight}' not found in array")
+        return arr[weight]
     else:
-        raise AttributeError("Variable must have 'input_branches' or 'branch' attribute")
-
-    # Ensure branches is a list
-    if not is_collection(branches):
-        branches = [branches]
-
-    # Get transformation function
-    transform = getattr(var, "expression", None)
-
-    # Validate range
-    if var.x_min >= var.x_max:
-        raise ValueError(f"Invalid variable range: x_min={var.x_min}, x_max={var.x_max}")
-
-    return hist1d_from_array(
-        arr=arr,
-        branches=branches,
-        name=var.name,
-        label=var.label,
-        range_=(var.x_min, var.x_max),
-        bins=var.n_bins,
-        transform=transform,
-        weight=weight,
-        **kwargs,
-    )
+        return weight
 
 
 def quick_hist1d(
-    arr: dict[str, Any],
-    branch: str,
+    array: np.ndarray,
+    name: str,
+    label: str,
     bins: int = 50,
     range_: tuple[float, float] | None = None,
-    weight: str | np.ndarray | None = None,
+    weight: np.ndarray | None = None,
     **kwargs,
 ) -> Hist:
     """
@@ -201,30 +233,38 @@ def quick_hist1d(
         weight: Optional weights
         **kwargs: Additional configuration
     """
-    if branch not in arr:
-        raise ValueError(f"Branch '{branch}' not found in array")
-
-    data = arr[branch]
 
     # Auto-detect range if not provided
     if range_ is None:
-        if len(data) == 0:
+        if len(array) == 0:
             raise ValueError("Cannot auto-detect range for empty data")
-        range_ = (float(np.min(data)), float(np.max(data)))
+        range_ = (float(np.min(array)), float(np.max(array)))
         # Add small padding
         padding = (range_[1] - range_[0]) * 0.05
         range_ = (range_[0] - padding, range_[1] + padding)
 
-    return hist1d_from_array(
-        arr=arr,
-        branches=branch,
-        name=branch,
-        label=branch.replace("_", " ").title(),
-        range_=range_,
-        bins=bins,
-        weight=weight,
-        **kwargs,
+    underflow = kwargs.get("underflow", False)
+    overflow = kwargs.get("overflow", False)
+
+    axis = hist.axis.Regular(
+        bins,
+        range_[0],
+        range_[1],
+        name=name,
+        label=label,
+        underflow=underflow,
+        overflow=overflow,
     )
+
+    histogram = histogram_from_axes([axis], name, storage=hist.storage.Weight())
+
+    # Fill histogram
+    try:
+        histogram.fill(array, weight=weight)
+    except Exception as e:
+        raise RuntimeError(f"Error filling histogram '{name}': {e}") from e
+
+    return histogram
 
 
 def plot_hist1d(
