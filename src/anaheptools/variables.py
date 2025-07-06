@@ -75,7 +75,7 @@ class Var(od.Variable):
 
     def is_computed(self) -> bool:
         """Check if this variable requires computation."""
-        return self.expression is not None
+        return not isinstance(self.expression, str)
 
     def __repr__(self) -> str:
         """String representation of the variable."""
