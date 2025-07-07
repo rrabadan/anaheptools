@@ -35,54 +35,73 @@ class Var(od.Variable):
 
         super().__init__(name, *args, **kwargs)
 
-        self.description = description or name
-        self.label = label or name
+        self._description = description or name
+        self._label = label or name
 
         # Handle input branches assignment
         if input_branches is None:
-            self.input_branches = []  # Default to empty list if no branches provided
+            self._input_branches = []  # Default to empty list if no branches provided
         elif isinstance(input_branches, str):
-            self.input_branches = [input_branches]  # Single branch as list
+            self._input_branches = [input_branches]  # Single branch as list
         else:
-            self.input_branches = input_branches
+            self._input_branches = input_branches
 
         # Handle expression assignment
-        self.expression = expression  # Leave as None if not provided
+        self._expression = expression  # Leave as None if not provided
 
-    def has_input_branches(self) -> bool:
-        """Check if this variable has any input branches defined."""
-        return bool(self.input_branches)
+    @property
+    def description(self) -> str:
+        """Get the description of the variable."""
+        return self._description
 
-    def get_input_branches(self) -> list[str]:
+    @property
+    def label(self) -> str:
+        """Get the human-readable label for the variable."""
+        return self._label
+
+    @property
+    def input_branches(self) -> list[str]:
         """Get list of input branch names needed for this variable."""
-        if not self.has_input_branches():
+        if not self.has_input_branches:
             raise ValueError(f"Variable '{self.name}' has no input branches defined.")
-        return self.input_branches.copy()  # Return copy to prevent external modification
+        return self._input_branches.copy()  # Return copy to prevent external modification
 
-    def get_branches(self) -> list[str]:
-        """Alias for get_input_branches() for consistency."""
-        return self.get_input_branches()
-
-    def set_input_branches(self, *branches: str) -> None:
+    @input_branches.setter
+    def input_branches(self, branches: list[str] | str) -> None:
         """Set the input branches for this variable."""
         if not branches:
             raise ValueError("At least one branch name must be provided.")
-        self.input_branches = list(set(branches))
+        if isinstance(branches, str):
+            self._input_branches = [branches]
+        elif isinstance(branches, list):
+            self._input_branches = list(set(branches))
+        else:
+            raise TypeError("input_branches must be string or list")
+
+    @property
+    def has_input_branches(self) -> bool:
+        """Check if this variable has any input branches defined."""
+        return bool(self._input_branches)
+
+    @property
+    def is_computed(self) -> bool:
+        """Check if this variable requires computation."""
+        return not isinstance(self.expression, str) or self._expression is not None
 
     def validate_branches(self, available_branches: list[str]) -> bool:
         """Check if all required branches are available."""
         return all(branch in available_branches for branch in self.input_branches)
 
-    def is_computed(self) -> bool:
-        """Check if this variable requires computation."""
-        return not isinstance(self.expression, str)
+    def get_branches(self) -> list[str]:
+        """Alias for get_input_branches() for consistency."""
+        return self.input_branches
 
     def __repr__(self) -> str:
         """String representation of the variable."""
         # branches_str = ", ".join(self.branch)
         return (
             f"Var(name='{self.name}', description='{self.description}'"
-            + f", x_min='{self.x_min}', x_max='{self.x_max}', is_computed='{self.is_computed()}')"
+            + f", x_min='{self.x_min}', x_max='{self.x_max}', is_computed='{self.is_computed}')"
         )
 
     @classmethod
@@ -139,13 +158,13 @@ class Var(od.Variable):
             RuntimeError: If transformation fails
         """
         # Check if variable has input branches
-        if not self.has_input_branches():
+        if not self.has_input_branches:
             raise ValueError(f"Variable '{self.name}' has no input branches defined")
 
         # Validate branches exist
         self.validate_branches_exist(data)
 
-        if self.is_computed():
+        if self.is_computed:
             # Use transformation
             return self.compute_from_branches(data)
 
@@ -161,7 +180,7 @@ class Var(od.Variable):
         Raises:
             ValueError: If required branches are missing
         """
-        if not self.has_input_branches():
+        if not self.has_input_branches:
             return  # Nothing to validate
 
         missing_branches = [b for b in self.input_branches if b not in data]
@@ -208,7 +227,7 @@ def get_all_var_input_branches(variables: list[Var]) -> list[str]:
     """
     branches = set()
     for var in variables:
-        branches.update(var.get_input_branches())
+        branches.update(var.input_branches)
 
     # Filter out None values if they somehow get through
     return [branch for branch in branches if branch is not None]
