@@ -1,7 +1,7 @@
 [project]
-name = "anaheptools"
+name = "hepkit"
 version = "0.1.0"
-description = "HEP analysis basic tools"
+description = "HEP analysis basic toolkit"
 readme = "README.md"
 authors = [
     { name = "Raul Rabadan", email = "raul.iraq.rabadan.trejo@cern.ch" }

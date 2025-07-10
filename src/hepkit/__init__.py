@@ -1,4 +1,4 @@
-"""anaheptools - High Energy Physics Data Analysis Utilities"""
+"""hepkit - High Energy Physics Analysis basic toolkit"""
 
 __version__ = "0.1.0"
 
