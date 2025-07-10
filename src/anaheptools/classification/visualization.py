@@ -4,9 +4,11 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import shap
 from hist import Hist
 
 from ..histograms import multi_hist1d_comparison
+from .evaluation import calculate_roc_curve
 
 
 def plot_correlations(
@@ -92,3 +94,133 @@ def plot_signal_background_comparison(
         colors=colors,
         **kwargs,
     )
+
+
+def plot_train_test_response(clf, X_train, y_train, X_test, y_test, bins=30, log_y=True):
+    """
+    Compare the classifier response on training and testing data.
+    Parameters:
+    - clf: The classifier object.
+    - X_train: The training data features.
+    - y_train: The training data labels.
+    - X_test: The testing data features.
+    - y_test: The testing data labels.
+    - bins: The number of bins for the histogram (default: 30).
+    Returns:
+    None
+    """
+    decisions = []
+    for X, y in ((X_train, y_train), (X_test, y_test)):
+        d1 = clf.predict_proba(X[y > 0.5])[:, 1].ravel()
+        d2 = clf.predict_proba(X[y < 0.5])[:, 1].ravel()
+        decisions += [d1, d2]
+
+    low = min(np.min(d) for d in decisions)
+    high = max(np.max(d) for d in decisions)
+    low_high = (low, high)
+
+    plt.figure()
+    plt.hist(
+        decisions[0],
+        color="r",
+        alpha=0.5,
+        range=low_high,
+        bins=bins,
+        histtype="stepfilled",
+        density=True,
+        label="Signal (train)",
+    )
+    plt.hist(
+        decisions[1],
+        color="b",
+        alpha=0.5,
+        range=low_high,
+        bins=bins,
+        histtype="stepfilled",
+        density=True,
+        label="Background (train)",
+    )
+
+    hist, bins = np.histogram(decisions[2], bins=bins, range=low_high, density=True)
+    scale = len(decisions[2]) / sum(hist)
+    err = np.sqrt(hist * scale) / scale
+
+    center = (bins[:-1] + bins[1:]) / 2
+    plt.errorbar(center, hist, yerr=err, fmt="o", c="r", label="Signal (test)")
+
+    hist, bins = np.histogram(decisions[3], bins=bins, range=low_high, density=True)
+    scale = len(decisions[2]) / sum(hist)
+    err = np.sqrt(hist * scale) / scale
+
+    plt.errorbar(center, hist, yerr=err, fmt="o", c="b", label="Background (test)")
+
+    plt.xlabel("BDT output")
+    plt.ylabel("Arbitrary units")
+    plt.legend(loc="best")
+    plt.grid()
+
+    # show in log y axis
+    if log_y:
+        plt.yscale("log")
+
+
+def plot_roc_auc(y_true, y_scores, label=None):
+    """Plot ROC curve with AUC."""
+    fpr, tpr, _, auc = calculate_roc_curve(y_true, y_scores)
+
+    plt.figure()
+    plt.plot(fpr, tpr, lw=2, label=f"ROC (AUC = {auc:.3f})" if label is None else label)
+    plt.plot([0, 1], [0, 1], "k--", lw=1)  # Diagonal line
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("Receiver Operating Characteristic")
+    plt.legend(loc="lower right")
+    plt.grid()
+
+
+def plot_roc_auc_comparison(y_true_list, y_scores_list, labels):
+    """Compare multiple ROC curves."""
+    plt.figure()
+    for y_true, y_scores, label in zip(y_true_list, y_scores_list, labels, strict=False):
+        fpr, tpr, _, auc = calculate_roc_curve(y_true, y_scores)
+        plt.plot(fpr, tpr, lw=2, label=f"{label} (AUC = {auc:.3f})")
+
+    plt.plot([0, 1], [0, 1], "k--", lw=1)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve Comparison")
+    plt.legend(loc="lower right")
+    plt.grid()
+
+
+def plot_signal_efficiency_vs_background_rejection(y_true, y_scores):
+    """Plot signal efficiency vs background rejection (HEP style ROC)."""
+    fpr, tpr, _, auc = calculate_roc_curve(y_true, y_scores)
+    background_rejection = 1 - fpr
+    signal_efficiency = tpr
+
+    plt.figure()
+    plt.plot(signal_efficiency, background_rejection, lw=2, label=f"AUC = {auc:.3f}")
+    plt.xlabel("Signal Efficiency")
+    plt.ylabel("Background Rejection")
+    plt.title("Signal Efficiency vs Background Rejection")
+    plt.legend(loc="best")
+    plt.grid()
+
+
+def plot_shap_summary(shap_values, X):
+    """
+    Plots the summary of SHAP values.
+
+    Parameters:
+    - shap_values (numpy.ndarray): The SHAP values.
+    - X (numpy.ndarray): The input data.
+
+    Returns:
+    None
+    """
+    shap.summary_plot(shap_values, X, show=False)
