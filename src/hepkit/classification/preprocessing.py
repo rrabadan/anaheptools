@@ -47,7 +47,9 @@ def _apply_split(data: pd.DataFrame, test_mask: np.ndarray) -> tuple[pd.DataFram
     Returns:
         Tuple of (train_set, test_set)
     """
-    return data.loc[~test_mask].copy(), data.loc[test_mask].copy()
+    train_set = data.loc[~test_mask].copy().reset_index(drop=True)
+    test_set = data.loc[test_mask].copy().reset_index(drop=True)
+    return train_set, test_set
 
 
 def split_train_test_by_id_crc32(
@@ -396,12 +398,16 @@ def _apply_transforms(df: pd.DataFrame, inputvars: list[Any]) -> pd.DataFrame:
     """
     features = [var.name for var in inputvars]
     transforms = [var.expression for var in inputvars]
-    branches = [var.branch if isinstance(var.branch, list) else [var.branch] for var in inputvars]
+    branches = [var.input_branches for var in inputvars]
 
     transformed_data = {}
     for feature, branch_list, transform in zip(features, branches, transforms, strict=False):
         # Apply transform using the specified branches
-        transformed_data[feature] = transform(*(df[b] for b in branch_list))
+        if isinstance(transform, str):
+            # If transform is a string, apply identity function (return first branch)
+            transformed_data[feature] = df[branch_list[0]]
+        else:
+            transformed_data[feature] = transform(*(df[b] for b in branch_list))
 
     return pd.DataFrame(transformed_data)
 

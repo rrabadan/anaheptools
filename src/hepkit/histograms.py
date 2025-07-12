@@ -708,12 +708,12 @@ def multi_hist1d_comparison(
             }
 
             pos = legend_positions.get(legend_location, (0.98, 0.98))
-            ha = "right" if "right" in legend_location else "left"
-            va = (
-                "top"
-                if "upper" in legend_location
-                else ("bottom" if "lower" in legend_location else "center")
-            )
+            # ha = "right" if "right" in legend_location else "left"
+            # va = (
+            #     "top"
+            #     if "upper" in legend_location
+            #     else ("bottom" if "lower" in legend_location else "center")
+            # )
 
             fig.legend(
                 handles,
@@ -725,8 +725,8 @@ def multi_hist1d_comparison(
                 frameon=True,
                 fancybox=True,
                 shadow=True,
-                ha=ha,
-                va=va,
+                # ha=ha,
+                # va=va,
             )
 
     # Apply layout adjustments

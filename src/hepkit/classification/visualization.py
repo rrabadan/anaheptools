@@ -83,7 +83,7 @@ def plot_signal_background_comparison(
         **kwargs: Additional arguments passed to multi_hist1d_comparison
     """
     if histtypes is None:
-        histtypes = ["step", "stepfilled"]
+        histtypes = ["step", "step"]
     if colors is None:
         colors = ["red", "blue"]
 
