@@ -6,17 +6,16 @@ readme = "README.md"
 authors = [
     { name = "Raul Rabadan", email = "raul.iraq.rabadan.trejo@cern.ch" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
-    "catboost>=1.2.7",
+    "catboost>=1.2.8",
     "hist[plot]>=2.8.1",
-    "ipywidgets>=8.1.5",
     "matplotlib>=3.10.3",
     "mplhep>=0.3.59",
     "order>=2.1.7",
     "pandas>=2.3.0",
     "scikit-learn>=1.7.0",
-    "shap>=0.46.0,<0.47.0",
+    "shap>=0.48.0",
 ]
 
 [build-system]
@@ -44,7 +43,7 @@ lint.ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
